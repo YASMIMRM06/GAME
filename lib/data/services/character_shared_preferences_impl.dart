@@ -13,10 +13,42 @@ final class CharacterSharedPreferencesService
   // Chave de armazenamento para os personagens
   static const String _storageKey = 'characters';
 
+  // antes tinha TODO e lançava UnimplementedError
+  // Busca todos os personagens, remove o que tem o mesmo id e salva a lista nova
   @override
-  Future<CharacterResult> deleteCharacter(String id) {
-    // TODO: implement deleteCharacter
-    throw UnimplementedError();
+  Future<CharacterResult> deleteCharacter(String id) async {
+    try {
+      final currentResult = await getAllCharacters();
+
+      return await currentResult.fold(
+        onSuccess: (characters) async {
+          // Encontra o personagem antes de deletar para retornar ele no sucesso
+          final toDelete = characters.where((c) => c.id == id).firstOrNull;
+
+          // Se não encontrou, retorna erro
+          if (toDelete == null) {
+            return Error(ApiLocalFailure('Personagem não encontrado'));
+          }
+
+          // Remove o personagem da lista pelo id
+          final updatedCharacters =
+              characters.where((c) => c.id != id).toList();
+
+          // Salva a lista atualizada no storage
+          await _saveCharacters(updatedCharacters);
+
+          // Retorna o personagem deletado (o observer usa para remover da UI)
+          return Success(toDelete);
+        },
+        onFailure: (failure) async {
+          return Error(ApiLocalFailure('Erro ao deletar personagem'));
+        },
+      );
+    } catch (e) {
+      return Error(
+        ApiLocalFailure('Shared Preferences - Erro ao deletar personagem: $e'),
+      );
+    }
   }
 
   @override
@@ -49,6 +81,8 @@ final class CharacterSharedPreferencesService
     throw UnimplementedError();
   }
 
+  // antes só adicionava, agora verifica se o id já existe
+  // Se existir → atualiza (update). Se não existir → adiciona (create).
   @override
   Future<CharacterResult> saveCharacter(Character character) async {
     try {
@@ -56,12 +90,27 @@ final class CharacterSharedPreferencesService
 
       return await currentResult.fold(
         onSuccess: (characters) async {
-          final updatedCharacters = [...characters, character];
+          // Verifica se já existe um personagem com o mesmo id
+          final exists = characters.any((c) => c.id == character.id);
+
+          List<Character> updatedCharacters;
+
+          if (exists) {
+            // UPDATE: substitui o personagem existente pelo novo
+            updatedCharacters = characters
+                .map((c) => c.id == character.id ? character : c)
+                .toList();
+          } else {
+            // CREATE: adiciona o novo personagem na lista
+            updatedCharacters = [...characters, character];
+          }
+
           await _saveCharacters(updatedCharacters);
           return Success(character);
         },
         onFailure: (failure) async {
           if (failure is EmptyResultFailure) {
+            // Lista vazia — só adiciona
             await _saveCharacters([character]);
             return Success(character);
           }
@@ -69,7 +118,6 @@ final class CharacterSharedPreferencesService
           return Error(ApiLocalFailure());
         },
       );
-      
     } catch (e) {
       return Error(
         ApiLocalFailure('Shared Preferences - Erro ao salvar personagem: $e'),
