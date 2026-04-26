@@ -6,7 +6,11 @@ import '../../../core/theme/app_theme.dart';
 import '../../../domain/models/character_entity.dart';
 import '../../controllers/characters_view_model.dart';
 
+/// Tela de edição de personagem
+/// Recebe o [character] da tela anterior via route extra (app_routes.dart)
+/// Preenche os campos com os dados do personagem e permite atualizar
 class CharacterEditView extends StatefulWidget {
+  // Personagem recebido da tela anterior via route extra
   final Character character;
 
   const CharacterEditView({super.key, required this.character});
@@ -16,25 +20,29 @@ class CharacterEditView extends StatefulWidget {
 }
 
 class _CharacterEditViewState extends State<CharacterEditView> {
+  // ViewModel singleton — mesmo que a tela de lista usa
   late final CharactersViewModel _viewModel;
+
+  // Chave para validar o formulário
   final _formKey = GlobalKey<FormState>();
 
+  // Controllers dos campos de texto — preenchidos com dados do personagem
   late final TextEditingController _nameController;
   late final TextEditingController _attackController;
   late final TextEditingController _healthController;
   late final TextEditingController _threatController;
 
+  // Estado local dos campos de enum e numéricos
   late CharacterClass _selectedClass;
   late CharacterRarity _selectedRarity;
   late CharacterAlignment _selectedAlignment;
   late int _level;
   late int _stars;
 
-  late final void Function() _disposeEffect;
-
   @override
   void initState() {
     super.initState();
+    // Pega o ViewModel do injetor de dependência (mesmo que o professor usa)
     _viewModel = injector.get<CharactersViewModel>();
 
     // Preenche todos os campos com os dados do personagem recebido
@@ -47,27 +55,11 @@ class _CharacterEditViewState extends State<CharacterEditView> {
     _selectedAlignment = widget.character.alignment;
     _level = widget.character.level;
     _stars = widget.character.stars;
-
-    // Mostra erro em SnackBar se o command falhar
-    _disposeEffect = effect(() {
-      final msg = _viewModel.charactersState.message.value;
-      if (msg != null && mounted) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(msg),
-              backgroundColor: Colors.red,
-            ),
-          );
-        });
-      }
-    });
   }
 
   @override
   void dispose() {
-    _disposeEffect();
+    // Libera os controllers ao sair da tela
     _nameController.dispose();
     _attackController.dispose();
     _healthController.dispose();
@@ -75,9 +67,14 @@ class _CharacterEditViewState extends State<CharacterEditView> {
     super.dispose();
   }
 
+  /// Chamado ao apertar Salvar ou o botão na AppBar
+  /// Valida o formulário, chama o UpdateCharacterCommand e volta para a lista
   Future<void> _salvar() async {
+    // Valida os campos — se inválido, não prossegue
     if (!_formKey.currentState!.validate()) return;
 
+    // Cria um Character novo com os dados alterados
+    // copyWith mantém os campos originais e só substitui os que você passar
     final characterAtualizado = widget.character.copyWith(
       name: _nameController.text.trim(),
       characterClass: _selectedClass,
@@ -88,19 +85,34 @@ class _CharacterEditViewState extends State<CharacterEditView> {
       attack: int.tryParse(_attackController.text) ?? widget.character.attack,
       health: int.tryParse(_healthController.text) ?? widget.character.health,
       threat: int.tryParse(_threatController.text) ?? widget.character.threat,
-      updatedAt: DateTime.now(),
+      updatedAt: DateTime.now(), // atualiza a data de modificação
     );
 
+    // Aguarda o command terminar completamente antes de checar o resultado
     await _viewModel.commands.updateCharacter(characterAtualizado);
 
-    // Volta para a tela anterior após salvar
-    if (mounted) context.pop();
+    // Se não estiver mais na tela, não faz nada
+    if (!mounted) return;
+
+    // Checa a mensagem de erro do estado
+    // null = sucesso → volta para a lista
+    // com mensagem = erro → mostra SnackBar e fica na tela
+    final msg = _viewModel.charactersState.message.value;
+    if (msg != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.red),
+      );
+    } else {
+      context.pop(); // volta para a tela anterior (lista de personagens)
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
 
+    // Watch reconstrói a tela quando isExecuting muda
+    // (para desabilitar o botão enquanto salva)
     return Watch((context) {
       final isExecuting =
           _viewModel.commands.updateCharacterCommand.isExecuting.value;
@@ -110,9 +122,9 @@ class _CharacterEditViewState extends State<CharacterEditView> {
           title: const Text('Editar personagem'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () => context.pop(), // botão de voltar sem salvar
           ),
-          // Botão salvar na AppBar — acesso rápido
+          // Botão salvar na AppBar — atalho para o mesmo _salvar()
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: AppSpacing.sm),
@@ -149,22 +161,20 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                 _SectionHeader(title: 'Identidade', icon: Icons.person),
                 const SizedBox(height: AppSpacing.sm),
 
-                // Nome
+                // Campo: Nome
                 TextFormField(
                   controller: _nameController,
                   style: const TextStyle(color: Colors.white),
-                  decoration: _inputDecoration('Nome do personagem', Icons.badge),
+                  decoration: _inputDecoration(context, 'Nome do personagem', Icons.badge),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Digite o nome' : null,
                 ),
                 const SizedBox(height: AppSpacing.md),
 
-                // Alinhamento em chips (herói / vilão / anti-herói)
+                // Campo: Alinhamento — chips lado a lado
                 Text(
                   'Alinhamento',
-                  style: context.textStyles.labelLarge?.withColor(
-                    colors.onSurfaceVariant,
-                  ),
+                  style: context.textStyles.labelLarge?.withColor(colors.onSurfaceVariant),
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Row(
@@ -182,8 +192,7 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                             ),
                           ),
                           selected: selected,
-                          onSelected: (_) =>
-                              setState(() => _selectedAlignment = a),
+                          onSelected: (_) => setState(() => _selectedAlignment = a),
                           selectedColor: colors.primary,
                           backgroundColor: colors.surfaceContainerHighest,
                         ),
@@ -193,44 +202,41 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
 
-                // ── SEÇÃO: Classe e raridade ───────────────────────────
+                // ── SEÇÃO: Classe e Raridade ───────────────────────────
                 _SectionHeader(title: 'Classe e Raridade', icon: Icons.shield),
                 const SizedBox(height: AppSpacing.sm),
 
+                // Classe e Raridade lado a lado
                 Row(
                   children: [
-                    // Classe
                     Expanded(
                       child: _DropdownField<CharacterClass>(
                         label: 'Classe',
                         value: _selectedClass,
                         items: CharacterClass.values,
                         itemLabel: (c) => c.displayName,
-                        onChanged: (v) =>
-                            setState(() => _selectedClass = v!),
+                        onChanged: (v) => setState(() => _selectedClass = v!),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
-                    // Raridade
                     Expanded(
                       child: _DropdownField<CharacterRarity>(
                         label: 'Raridade',
                         value: _selectedRarity,
                         items: CharacterRarity.values,
                         itemLabel: (r) => r.displayName,
-                        onChanged: (v) =>
-                            setState(() => _selectedRarity = v!),
+                        onChanged: (v) => setState(() => _selectedRarity = v!),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
 
-                // ── SEÇÃO: Nível e estrelas ────────────────────────────
+                // ── SEÇÃO: Progressão ──────────────────────────────────
                 _SectionHeader(title: 'Progressão', icon: Icons.star),
                 const SizedBox(height: AppSpacing.sm),
 
-                // Level
+                // Level: slider de 1 a 80
                 _SliderField(
                   label: 'Level',
                   value: _level.toDouble(),
@@ -241,7 +247,7 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
 
-                // Estrelas
+                // Estrelas: slider de 1 a 14
                 _SliderField(
                   label: 'Estrelas',
                   value: _stars.toDouble(),
@@ -252,10 +258,11 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
 
-                // ── SEÇÃO: Atributos de combate ────────────────────────
+                // ── SEÇÃO: Atributos de Combate ────────────────────────
                 _SectionHeader(title: 'Atributos de Combate', icon: Icons.sports_mma),
                 const SizedBox(height: AppSpacing.sm),
 
+                // Ataque e Vida lado a lado
                 Row(
                   children: [
                     Expanded(
@@ -263,11 +270,9 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                         controller: _attackController,
                         style: const TextStyle(color: Colors.white),
                         keyboardType: TextInputType.number,
-                        decoration: _inputDecoration('Ataque', Icons.flash_on),
+                        decoration: _inputDecoration(context, 'Ataque', Icons.flash_on),
                         validator: (v) =>
-                            (v == null || int.tryParse(v) == null)
-                                ? 'Número inválido'
-                                : null,
+                            (v == null || int.tryParse(v) == null) ? 'Número inválido' : null,
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
@@ -276,30 +281,28 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                         controller: _healthController,
                         style: const TextStyle(color: Colors.white),
                         keyboardType: TextInputType.number,
-                        decoration: _inputDecoration('Vida', Icons.favorite),
+                        decoration: _inputDecoration(context, 'Vida', Icons.favorite),
                         validator: (v) =>
-                            (v == null || int.tryParse(v) == null)
-                                ? 'Número inválido'
-                                : null,
+                            (v == null || int.tryParse(v) == null) ? 'Número inválido' : null,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
 
+                // Ameaça
                 TextFormField(
                   controller: _threatController,
                   style: const TextStyle(color: Colors.white),
                   keyboardType: TextInputType.number,
-                  decoration: _inputDecoration('Ameaça', Icons.warning_amber),
+                  decoration: _inputDecoration(context, 'Ameaça', Icons.warning_amber),
                   validator: (v) =>
-                      (v == null || int.tryParse(v) == null)
-                          ? 'Número inválido'
-                          : null,
+                      (v == null || int.tryParse(v) == null) ? 'Número inválido' : null,
                 ),
                 const SizedBox(height: AppSpacing.xl),
 
                 // ── Botão Atualizar ────────────────────────────────────
+                // isExecuting desabilita o botão enquanto o command roda
                 ElevatedButton.icon(
                   onPressed: isExecuting ? null : _salvar,
                   icon: isExecuting
@@ -314,15 +317,10 @@ class _CharacterEditViewState extends State<CharacterEditView> {
                       : const Icon(Icons.save),
                   label: Text(
                     isExecuting ? 'Salvando...' : 'Atualizar personagem',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.md,
-                    ),
+                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -334,8 +332,8 @@ class _CharacterEditViewState extends State<CharacterEditView> {
     });
   }
 
-  // Helper para estilo dos campos de texto
-  InputDecoration _inputDecoration(String label, IconData icon) {
+  /// Helper para estilo padrão dos campos de texto
+  InputDecoration _inputDecoration(BuildContext context, String label, IconData icon) {
     final colors = Theme.of(context).colorScheme;
     return InputDecoration(
       labelText: label,
@@ -355,7 +353,11 @@ class _CharacterEditViewState extends State<CharacterEditView> {
   }
 }
 
-// ── Widget auxiliar: cabeçalho de seção ───────────────────────────────────────
+// =============================================================================
+//   WIDGETS AUXILIARES — usados apenas nessa tela
+// =============================================================================
+
+/// Cabeçalho de seção com ícone e linha divisória
 class _SectionHeader extends StatelessWidget {
   final String title;
   final IconData icon;
@@ -371,9 +373,7 @@ class _SectionHeader extends StatelessWidget {
         const SizedBox(width: AppSpacing.xs),
         Text(
           title.toUpperCase(),
-          style: context.textStyles.labelMedium?.withColor(
-            colors.onSurfaceVariant,
-          ),
+          style: context.textStyles.labelMedium?.withColor(colors.onSurfaceVariant),
         ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
@@ -384,7 +384,7 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-// ── Widget auxiliar: dropdown estilizado ──────────────────────────────────────
+/// Dropdown estilizado com o tema do app
 class _DropdownField<T> extends StatelessWidget {
   final String label;
   final T value;
@@ -422,17 +422,14 @@ class _DropdownField<T> extends StatelessWidget {
         ),
       ),
       items: items
-          .map((i) => DropdownMenuItem(
-                value: i,
-                child: Text(itemLabel(i)),
-              ))
+          .map((i) => DropdownMenuItem(value: i, child: Text(itemLabel(i))))
           .toList(),
       onChanged: onChanged,
     );
   }
 }
 
-// ── Widget auxiliar: slider com label ─────────────────────────────────────────
+/// Slider com label e fundo preenchido com o tema do app
 class _SliderField extends StatelessWidget {
   final String label;
   final double value;
@@ -465,12 +462,10 @@ class _SliderField extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 80,
+            width: 90,
             child: Text(
               '$label: ${value.toInt()}',
-              style: context.textStyles.labelLarge?.withColor(
-                colors.onSurfaceVariant,
-              ),
+              style: context.textStyles.labelLarge?.withColor(colors.onSurfaceVariant),
             ),
           ),
           Expanded(
